@@ -19,6 +19,7 @@ type Task struct {
 	Title       string    `json:"title" gorm:"not null"`
 	Description string    `json:"description"`
 	Status      Status    `json:"status" gorm:"default:'pending"`
+	UserID      uint      `json:"user_id" gorm:"not null"`
 	DueDate     time.Time `json:"due_date"`
 }
 

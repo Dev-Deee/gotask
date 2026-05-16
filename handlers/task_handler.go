@@ -10,7 +10,10 @@ import (
 
 func GetTasks(c *gin.Context) {
 	var tasks []models.Task
-	query := db.DB.Model(&models.Task{})
+
+	user, _ := c.MustGet("currentUser").(models.User)
+	query := db.DB.Where("user_id = ?", user.ID)
+
 	if status := c.Query("status"); status != "" {
 		query = query.Where("status = ?", status)
 	}
@@ -27,7 +30,14 @@ func CreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	task := models.Task{Title: input.Title, Description: input.Description}
+
+	user, _ := c.MustGet("currentUser").(models.User)
+
+	task := models.Task{
+		Title:       input.Title,
+		Description: input.Description,
+		UserID:      user.ID,
+	}
 	if err := db.DB.Create(&task).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -36,18 +46,32 @@ func CreateTask(c *gin.Context) {
 }
 
 func GetTask(c *gin.Context) {
+	user, _ := c.MustGet("currentUser").(models.User)
 	var task models.Task
-	if err := db.DB.First(&task, c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+	if err := db.DB.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&task).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "task not found"})
 		return
 	}
+
+	if task.UserID != user.ID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not your task"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": task})
 }
 
 func UpdateTask(c *gin.Context) {
+	user, _ := c.MustGet("currentUser").(models.User)
+
 	var task models.Task
-	if err := db.DB.First(&task, c.Param("id")).Error; err != nil {
+	if err := db.DB.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&task).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		return
+	}
+
+	if task.UserID != user.ID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not your task"})
 		return
 	}
 
@@ -61,46 +85,74 @@ func UpdateTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": task})
 }
 
+func GetTasksByStatus(c *gin.Context) {
+	user, _ := c.MustGet("currentUser").(models.User)
+
+	var tasks []models.Task
+	status := c.Query("status")
+
+	query := db.DB.Where("user_id = ?", user.ID)
+
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	if err := query.Find(&tasks).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": tasks,
+	})
+}
+
 func DeleteTask(c *gin.Context) {
+	user, _ := c.MustGet("currentUser").(models.User)
+
 	var task models.Task
-	if err := db.DB.First(&task, c.Param("id")).Error; err != nil {
+	if err := db.DB.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&task).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		return
+	}
+	if task.UserID != user.ID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not your task"})
 		return
 	}
 	db.DB.Delete(&task)
 	c.JSON(http.StatusNoContent, nil)
 }
 
-func GetTasksByStatus(c *gin.Context) {
-	var tasks []models.Task
-	status := c.Query("status")
-	query := db.DB.Model(&models.Task{})
-	if status != "" {
-		query = query.Where("status = ?", status)
-	}
-	if err := query.Find(&tasks).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": tasks})
-}
-
 func PatchTask(c *gin.Context) {
-	var task models.Task
-	id := c.Param("id")
+	user, _ := c.MustGet("currentUser").(models.User)
 
-	if err := db.DB.First(&task, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+	var task models.Task
+
+	if err := db.DB.
+		Where("id = ? AND user_id = ?", c.Param("id"), user.ID).
+		First(&task).Error; err != nil {
+
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "task not found",
+		})
 		return
 	}
+
 	var input models.PatchTaskInput
+
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest,
+			gin.H{"error": err.Error()})
 		return
 	}
+
 	if err := db.DB.Model(&task).Updates(input).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError,
+			gin.H{"error": err.Error()})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{"data": task})
 }
